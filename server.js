@@ -107,7 +107,9 @@ app.post('/upload', upload.single('image'), async (req, res) => {
         size: file.size,
         mimetype: file.mimetype
       } : {},
-      webhookUrl: `http://localhost:${port}/webhook/response/${messageId}`
+      webhookUrl: process.env.WEBHOOK_BASE_URL ? 
+        `${process.env.WEBHOOK_BASE_URL}/webhook/response/${messageId}` : 
+        `http://localhost:${port}/webhook/response/${messageId}`
     };
 
     // Send to RabbitMQ if connected
