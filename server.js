@@ -167,54 +167,111 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 });
 
 // Webhook endpoint to receive N8N responses (with binary file support)
-app.post('/webhook/response/:messageId', webhookUpload.single('data'), (req, res) => {
+app.post('/webhook/response/:messageId', (req, res) => {
   try {
     const { messageId } = req.params;
-    const file = req.file;
-    const textData = req.body;
+    const contentType = req.headers['content-type'];
 
     console.log('=== WEBHOOK RECEIVED ===');
     console.log('Message ID:', messageId);
-    console.log('Text Data:', textData);
-    console.log('File Info:', file ? {
-      filename: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size
-    } : 'No file');
+    console.log('Content-Type:', contentType);
     console.log('Headers:', req.headers);
     console.log('========================');
 
-    // Prepare response data
-    let responseData = {
-      text: textData.text || 'Imagen procesada exitosamente',
-      timestamp: new Date().toISOString()
-    };
-
-    // Add image data if file is present
-    if (file) {
-      responseData.image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-    }
-
-    if (messageStore.has(messageId)) {
-      const storedMessage = messageStore.get(messageId);
-      storedMessage.response = responseData;
-      storedMessage.responseTimestamp = new Date().toISOString();
-      messageStore.set(messageId, storedMessage);
-
-      console.log('Response stored for message:', messageId);
+    // Handle raw binary data (when N8N sends image directly)
+    if (contentType && contentType.startsWith('image/')) {
+      // Collect raw binary data
+      let imageData = Buffer.alloc(0);
       
-      res.json({ 
-        success: true, 
-        message: 'Response received and stored',
-        messageId: messageId
+      req.on('data', chunk => {
+        imageData = Buffer.concat([imageData, chunk]);
       });
-    } else {
-      console.log('Message ID not found:', messageId);
-      res.status(404).json({ 
-        error: 'Message ID not found',
-        messageId: messageId
+      
+      req.on('end', () => {
+        console.log('Raw image received, size:', imageData.length);
+        
+        const responseData = {
+          text: 'Imagen procesada exitosamente',
+          image: `data:${contentType};base64,${imageData.toString('base64')}`,
+          timestamp: new Date().toISOString()
+        };
+
+        if (messageStore.has(messageId)) {
+          const storedMessage = messageStore.get(messageId);
+          storedMessage.response = responseData;
+          storedMessage.responseTimestamp = new Date().toISOString();
+          messageStore.set(messageId, storedMessage);
+
+          console.log('Response stored for message:', messageId);
+          
+          res.json({ 
+            success: true, 
+            message: 'Response received and stored',
+            messageId: messageId
+          });
+        } else {
+          console.log('Message ID not found:', messageId);
+          res.status(404).json({ 
+            error: 'Message ID not found',
+            messageId: messageId
+          });
+        }
       });
+      
+      return; // Exit early for raw binary handling
     }
+
+    // Handle multipart/form-data (original implementation)
+    webhookUpload.single('data')(req, res, (err) => {
+      if (err) {
+        console.error('Multer error:', err);
+        return res.status(500).json({ error: 'File upload error' });
+      }
+
+      const file = req.file;
+      const textData = req.body;
+
+      console.log('Multipart data received:');
+      console.log('Text Data:', textData);
+      console.log('File Info:', file ? {
+        filename: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size
+      } : 'No file');
+
+      // Prepare response data
+      let responseData = {
+        text: textData.text || 'Imagen procesada exitosamente',
+        timestamp: new Date().toISOString()
+      };
+
+      // Add image data if file is present
+      if (file) {
+        responseData.image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      }
+
+      if (messageStore.has(messageId)) {
+        const storedMessage = messageStore.get(messageId);
+        storedMessage.response = responseData;
+        storedMessage.responseTimestamp = new Date().toISOString();
+        messageStore.set(messageId, storedMessage);
+
+        console.log('Response stored for message:', messageId);
+        
+        res.json({ 
+          success: true, 
+          message: 'Response received and stored',
+          messageId: messageId
+        });
+      } else {
+        console.log('Message ID not found:', messageId);
+        res.status(404).json({ 
+          error: 'Message ID not found',
+          messageId: messageId
+        });
+      }
+    });
+
   } catch (error) {
     console.error('Webhook error:', error);
     res.status(500).json({ error: 'Failed to process webhook response' });
