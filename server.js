@@ -15,6 +15,8 @@ app.use(express.static('public'));
 
 // Multer configuration for memory storage
 const storage = multer.memoryStorage();
+
+// Upload for user uploads (only images)
 const upload = multer({ 
   storage: storage,
   limits: {
@@ -26,6 +28,14 @@ const upload = multer({
     } else {
       cb(new Error('Only image files are allowed!'), false);
     }
+  }
+});
+
+// Upload for webhook responses (all file types)
+const webhookUpload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
   }
 });
 
@@ -156,17 +166,34 @@ app.post('/upload', upload.single('image'), async (req, res) => {
   }
 });
 
-// Webhook endpoint to receive N8N responses
-app.post('/webhook/response/:messageId', (req, res) => {
+// Webhook endpoint to receive N8N responses (with binary file support)
+app.post('/webhook/response/:messageId', webhookUpload.single('data'), (req, res) => {
   try {
     const { messageId } = req.params;
-    const responseData = req.body;
+    const file = req.file;
+    const textData = req.body;
 
     console.log('=== WEBHOOK RECEIVED ===');
     console.log('Message ID:', messageId);
-    console.log('Response Data:', JSON.stringify(responseData, null, 2));
+    console.log('Text Data:', textData);
+    console.log('File Info:', file ? {
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size
+    } : 'No file');
     console.log('Headers:', req.headers);
     console.log('========================');
+
+    // Prepare response data
+    let responseData = {
+      text: textData.text || 'Imagen procesada exitosamente',
+      timestamp: new Date().toISOString()
+    };
+
+    // Add image data if file is present
+    if (file) {
+      responseData.image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    }
 
     if (messageStore.has(messageId)) {
       const storedMessage = messageStore.get(messageId);
